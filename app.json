@@ -19,6 +19,14 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow Grocerease Rider to use your location for background tracking."
+        }
+      ]
+    ]
   }
 }
