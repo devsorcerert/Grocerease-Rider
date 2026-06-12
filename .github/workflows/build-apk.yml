@@ -36,28 +36,41 @@ jobs:
       - name: Generate native Android folder
         run: npx expo prebuild --platform android --no-install
 
-      - name: Patch build.gradle signing config
+      - name: Inspect and fix build.gradle
         run: |
-          BUILD_GRADLE="android/app/build.gradle"
-          # Replace empty MYAPP_UPLOAD_STORE_FILE with debug keystore path
-          sed -i 's|def keystoreFile = project.env.get("MYAPP_UPLOAD_STORE_FILE")|def keystoreFile = "debug.keystore"|g' $BUILD_GRADLE
-          sed -i 's|storeFile keystoreFile ? file(keystoreFile) : null|storeFile file("debug.keystore")|g' $BUILD_GRADLE
-          sed -i 's|storeFile(keystoreFile)|storeFile(file("debug.keystore"))|g' $BUILD_GRADLE
-          # Also inject signing props in case they are read from gradle.properties
+          echo "=== android/app/build.gradle first 30 lines ==="
+          head -30 android/app/build.gradle
+          echo "=== END ==="
+          # Use Python to fix any file('') calls with file('debug.keystore')
+          python3 -c "
+import re
+with open('android/app/build.gradle', 'r') as f:
+    content = f.read()
+print('=== ORIGINAL LINES 10-15 ===')
+lines = content.split(chr(10))
+for i, line in enumerate(lines[9:15], start=10):
+    print(f'{i}: {repr(line)}')
+# Fix: replace file('') or file(\"\") with file('debug.keystore')
+content = re.sub(r\"file\\(('|\\\")\\1\\)\", \"file('debug.keystore')\", content)
+# Also fix storeFile null patterns
+content = content.replace(\"storeFile null\", \"storeFile file('debug.keystore')\")
+with open('android/app/build.gradle', 'w') as f:
+    f.write(content)
+print('=== PATCHED LINES 10-15 ===')
+lines = content.split(chr(10))
+for i, line in enumerate(lines[9:15], start=10):
+    print(f'{i}: {repr(line)}')
+"
+          # Also inject signing props
           echo "MYAPP_UPLOAD_STORE_FILE=debug.keystore" >> android/gradle.properties
           echo "MYAPP_UPLOAD_KEY_ALIAS=androiddebugkey" >> android/gradle.properties
           echo "MYAPP_UPLOAD_STORE_PASSWORD=android" >> android/gradle.properties
           echo "MYAPP_UPLOAD_KEY_PASSWORD=android" >> android/gradle.properties
-          # Print the first 20 lines of build.gradle for debugging
-          echo "=== android/app/build.gradle (first 25 lines) ==="
-          head -25 $BUILD_GRADLE
-
-      - name: Generate debug keystore
-        run: |
-          keytool -genkey -v -keystore android/app/debug.keystore \
-            -alias androiddebugkey -keyalg RSA -keysize 2048 \
-            -validity 10000 -storepass android -keypass android \
-            -dname "CN=Android Debug,O=Android,C=US" 2>&1 || true
+          # Copy Android debug keystore to app dir
+          cp ~/.android/debug.keystore android/app/debug.keystore 2>/dev/null || \
+            keytool -genkey -v -keystore android/app/debug.keystore -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android \
+              -dname "CN=Debug,O=Android,C=US" 2>&1
 
       - name: Cache Gradle packages
         uses: actions/cache@v4
