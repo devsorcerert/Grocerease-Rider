@@ -36,6 +36,15 @@ jobs:
       - name: Generate native Android folder
         run: npx expo prebuild --platform android --no-install
 
+      - name: Create gradle.properties with signing placeholders
+        run: |
+          cat >> android/gradle.properties << 'EOF'
+          MYAPP_UPLOAD_STORE_FILE=debug.keystore
+          MYAPP_UPLOAD_KEY_ALIAS=androiddebugkey
+          MYAPP_UPLOAD_STORE_PASSWORD=android
+          MYAPP_UPLOAD_KEY_PASSWORD=android
+          EOF
+
       - name: Cache Gradle packages
         uses: actions/cache@v4
         with:
