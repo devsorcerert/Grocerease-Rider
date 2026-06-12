@@ -36,19 +36,28 @@ jobs:
       - name: Generate native Android folder
         run: npx expo prebuild --platform android --no-install
 
-      - name: Create debug keystore for CI
+      - name: Patch build.gradle signing config
         run: |
-          keytool -genkey -v -keystore android/app/debug.keystore \
-            -alias androiddebugkey -keyalg RSA -keysize 2048 \
-            -validity 10000 -storepass android -keypass android \
-            -dname "CN=Android Debug,O=Android,C=US"
-
-      - name: Inject signing props into gradle.properties
-        run: |
+          BUILD_GRADLE="android/app/build.gradle"
+          # Replace empty MYAPP_UPLOAD_STORE_FILE with debug keystore path
+          sed -i 's|def keystoreFile = project.env.get("MYAPP_UPLOAD_STORE_FILE")|def keystoreFile = "debug.keystore"|g' $BUILD_GRADLE
+          sed -i 's|storeFile keystoreFile ? file(keystoreFile) : null|storeFile file("debug.keystore")|g' $BUILD_GRADLE
+          sed -i 's|storeFile(keystoreFile)|storeFile(file("debug.keystore"))|g' $BUILD_GRADLE
+          # Also inject signing props in case they are read from gradle.properties
           echo "MYAPP_UPLOAD_STORE_FILE=debug.keystore" >> android/gradle.properties
           echo "MYAPP_UPLOAD_KEY_ALIAS=androiddebugkey" >> android/gradle.properties
           echo "MYAPP_UPLOAD_STORE_PASSWORD=android" >> android/gradle.properties
           echo "MYAPP_UPLOAD_KEY_PASSWORD=android" >> android/gradle.properties
+          # Print the first 20 lines of build.gradle for debugging
+          echo "=== android/app/build.gradle (first 25 lines) ==="
+          head -25 $BUILD_GRADLE
+
+      - name: Generate debug keystore
+        run: |
+          keytool -genkey -v -keystore android/app/debug.keystore \
+            -alias androiddebugkey -keyalg RSA -keysize 2048 \
+            -validity 10000 -storepass android -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US" 2>&1 || true
 
       - name: Cache Gradle packages
         uses: actions/cache@v4
