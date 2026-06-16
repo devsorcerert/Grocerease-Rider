@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, Button, Alert, ActivityIndicator } from 'react-native';
 import * as Location from 'expo-location';
 
-const BASE_URL = 'http://10.0.2.2:8000';
+const BASE_URL = 'https://api.grocereasetv.com';
 
 export default function App() {
   const [phone, setPhone] = useState('9999999999');
@@ -13,7 +13,7 @@ export default function App() {
   const handleLogin = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${BASE_URL}/rider/login`, {
+      const response = await fetch(`${BASE_URL}/api/rider/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone, password })
@@ -47,7 +47,7 @@ export default function App() {
       const interval = setInterval(async () => {
         try {
           let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          await fetch(`${BASE_URL}/rider/location`, {
+          await fetch(`${BASE_URL}/api/rider/location`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -75,7 +75,7 @@ export default function App() {
     if (!rider || !rider.current_order) return;
     try {
       setLoading(true);
-      const response = await fetch(`${BASE_URL}/rider/order-status`, {
+      const response = await fetch(`${BASE_URL}/api/rider/order-status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
