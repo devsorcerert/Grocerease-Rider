@@ -1,8 +1,62 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, Button, Alert, ActivityIndicator } from 'react-native';
 import * as Location from 'expo-location';
+import * as TaskManager from 'expo-task-manager';
+import * as SecureStore from 'expo-secure-store';
 
-const BASE_URL = 'https://api.grocereasetv.com';
+const LOCATION_TASK = 'rider-location-upload';
+
+// Must be defined at module level — TaskManager requires this to be outside any component.
+// Uses raw fetch (not api()) because this runs in a background context with no access
+// to the component's clearSession binding. Token is read fresh from SecureStore each tick.
+TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
+  if (error) { console.warn('Background location error:', error.message); return; }
+  if (!data) return;
+  const { locations } = data;
+  const loc = locations[0];
+  if (!loc) return;
+  try {
+    const savedToken = await SecureStore.getItemAsync('rider_token');
+    if (!savedToken) return;
+    await fetch(`${BASE_URL}/api/rider/location`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${savedToken}` },
+      body: JSON.stringify({ lat: loc.coords.latitude, lng: loc.coords.longitude })
+    });
+  } catch (e) {
+    console.warn('Background location upload failed:', e.message);
+  }
+});
+
+const RENDER_FALLBACK = 'https://grocerease-backend-0uip.onrender.com';
+const _configured = process.env.EXPO_PUBLIC_API_BASE_URL || process.env.API_BASE_URL;
+if (_configured === 'https://api.grocereasetv.com') {
+  console.warn('EXPO_PUBLIC_API_BASE_URL points to the dead domain api.grocereasetv.com — falling back to Render pilot URL');
+}
+const BASE_URL = (_configured && _configured !== 'https://api.grocereasetv.com')
+  ? _configured
+  : RENDER_FALLBACK;
+
+// Central fetch wrapper — handles network failures and 401s in one place.
+// skipAuthRedirect: true for login, where 401 means wrong credentials not expired session.
+async function apiFetch(url, options, onUnauthorized, { skipAuthRedirect = false } = {}) {
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch (e) {
+    console.warn('apiFetch network error:', e.message);
+    return null;
+  }
+  if (response.status === 401) {
+    if (!skipAuthRedirect) {
+      await SecureStore.deleteItemAsync('rider_token');
+      await SecureStore.deleteItemAsync('rider_session');
+      onUnauthorized();
+    }
+    return null;
+  }
+  return response;
+}
 
 export default function App() {
   const [phone, setPhone] = useState('');
@@ -10,11 +64,35 @@ export default function App() {
   const [rider, setRider] = useState(null);
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [restoring, setRestoring] = useState(true);
+
+  const clearSession = () => { setRider(null); setToken(null); };
+
+  // Bind onUnauthorized once; every API call uses this instead of raw fetch
+  const api = (url, options, flags) => apiFetch(url, options, clearSession, flags);
 
   const authHeaders = (tok) => ({
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${tok}`
   });
+
+  // Restore session from secure storage on launch
+  useEffect(() => {
+    (async () => {
+      try {
+        const savedToken = await SecureStore.getItemAsync('rider_token');
+        const savedRider = await SecureStore.getItemAsync('rider_session');
+        if (savedToken && savedRider) {
+          setToken(savedToken);
+          setRider(JSON.parse(savedRider));
+        }
+      } catch (e) {
+        console.warn('Session restore failed:', e.message);
+      } finally {
+        setRestoring(false);
+      }
+    })();
+  }, []);
 
   const handleLogin = async () => {
     if (!phone.trim() || !password.trim()) {
@@ -23,17 +101,20 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const response = await fetch(`${BASE_URL}/api/rider/login`, {
+      const response = await api(`${BASE_URL}/api/rider/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone, password })
-      });
+      }, { skipAuthRedirect: true });
+      if (!response) { Alert.alert('Network error', "Couldn't reach server, try again"); return; }
       const data = await response.json();
       if (!response.ok) {
         Alert.alert('Login failed', data.detail || 'Unknown error');
       } else {
         setToken(data.token);
         setRider(data);
+        await SecureStore.setItemAsync('rider_token', data.token);
+        await SecureStore.setItemAsync('rider_session', JSON.stringify(data));
       }
     } catch (e) {
       Alert.alert('Network error', e.message);
@@ -44,38 +125,44 @@ export default function App() {
 
   useEffect(() => {
     if (!rider || !token) return;
-    let locationInterval = null;
 
     const startTracking = async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Location permission denied');
-        return;
+      const { status: fg } = await Location.requestForegroundPermissionsAsync();
+      if (fg !== 'granted') { Alert.alert('Location permission denied'); return; }
+
+      const { status: bg } = await Location.requestBackgroundPermissionsAsync();
+      if (bg !== 'granted') {
+        Alert.alert('Background location denied', 'Location will only update while the app is open.');
       }
 
-      locationInterval = setInterval(async () => {
-        try {
-          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          await fetch(`${BASE_URL}/api/rider/location`, {
-            method: 'POST',
-            headers: authHeaders(token),
-            body: JSON.stringify({ lat: loc.coords.latitude, lng: loc.coords.longitude })
-          });
-        } catch (err) {
-          console.error('Location tracking error:', err);
-        }
-      }, 5000);
+      const already = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK).catch(() => false);
+      if (!already) {
+        await Location.startLocationUpdatesAsync(LOCATION_TASK, {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 5000,
+          distanceInterval: 0,
+          showsBackgroundLocationIndicator: true,
+          foregroundService: {
+            notificationTitle: 'GrocerEase Rider',
+            notificationBody: 'Tracking your location for active delivery',
+          },
+        });
+      }
     };
 
     startTracking();
-    return () => { if (locationInterval) clearInterval(locationInterval); };
+    return () => {
+      Location.hasStartedLocationUpdatesAsync(LOCATION_TASK)
+        .then(started => { if (started) Location.stopLocationUpdatesAsync(LOCATION_TASK); })
+        .catch(() => {});
+    };
   }, [rider, token]);
 
   const updateStatus = async (status) => {
     if (!rider?.current_order || !token) return;
     setLoading(true);
     try {
-      const response = await fetch(`${BASE_URL}/api/rider/order-status`, {
+      const response = await api(`${BASE_URL}/api/rider/order-status`, {
         method: 'POST',
         headers: authHeaders(token),
         body: JSON.stringify({
@@ -83,6 +170,7 @@ export default function App() {
           status
         })
       });
+      if (!response) { Alert.alert('Network error', "Couldn't reach server, try again"); return; }
       if (response.ok) {
         if (status === 'delivered') {
           setRider({ ...rider, current_order: null });
@@ -100,6 +188,22 @@ export default function App() {
       setLoading(false);
     }
   };
+
+  const handleLogout = async () => {
+    const started = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK).catch(() => false);
+    if (started) await Location.stopLocationUpdatesAsync(LOCATION_TASK);
+    await SecureStore.deleteItemAsync('rider_token');
+    await SecureStore.deleteItemAsync('rider_session');
+    clearSession();
+  };
+
+  if (restoring) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color="#2D8B47" />
+      </View>
+    );
+  }
 
   if (!rider) {
     return (
@@ -158,7 +262,7 @@ export default function App() {
         )}
       </View>
 
-      <Button title="Logout" color="#e74c3c" onPress={() => { setRider(null); setToken(null); }} />
+      <Button title="Logout" color="#e74c3c" onPress={handleLogout} />
     </View>
   );
 }
