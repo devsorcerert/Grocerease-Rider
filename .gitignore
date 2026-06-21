@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+
+# Android build outputs
+android/build/
+android/app/build/
+*.apk
+*.aab
+
+# iOS build outputs
+ios/build/
+*.ipa
+
+# Environment variables
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
