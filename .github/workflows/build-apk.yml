@@ -68,35 +68,45 @@ jobs:
         working-directory: android
         run: chmod +x gradlew
 
-      - name: Build debug APK
+      - name: Build release APK (bundles JS automatically)
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.daemon=false"
+
+      - name: Verify JS bundle is embedded in APK
+        run: |
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          if unzip -l "$APK" | grep -q "assets/index.android.bundle"; then
+            echo "✅ JS bundle confirmed present in APK"
+          else
+            echo "❌ JS bundle NOT found in APK — failing build"
+            exit 1
+          fi
 
       - name: Rename APK
         run: |
           mkdir -p /home/runner/apk-output
-          cp android/app/build/outputs/apk/debug/app-debug.apk \
-            /home/runner/apk-output/Grocerease-Rider-debug-${{ github.sha }}.apk
+          cp android/app/build/outputs/apk/release/app-release.apk \
+            /home/runner/apk-output/Grocerease-Rider-release-${{ github.sha }}.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Grocerease-Rider-debug-${{ github.sha }}
-          path: /home/runner/apk-output/Grocerease-Rider-debug-${{ github.sha }}.apk
+          name: Grocerease-Rider-release-${{ github.sha }}
+          path: /home/runner/apk-output/Grocerease-Rider-release-${{ github.sha }}.apk
           retention-days: 30
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: "Debug Build #${{ github.run_number }}"
+          name: "Release Build #${{ github.run_number }}"
           body: |
-            **Automatic debug build**
+            **Standalone release build (JS bundle embedded)**
             Commit: `${{ github.sha }}`
             Branch: `${{ github.ref_name }}`
-          files: /home/runner/apk-output/Grocerease-Rider-debug-${{ github.sha }}.apk
+          files: /home/runner/apk-output/Grocerease-Rider-release-${{ github.sha }}.apk
           draft: false
           prerelease: false
         env:
