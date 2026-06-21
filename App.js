@@ -1,7 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, Button, Alert, ActivityIndicator } from 'react-native';
 import * as Location from 'expo-location';
+import * as TaskManager from 'expo-task-manager';
 import * as SecureStore from 'expo-secure-store';
+
+const LOCATION_TASK = 'rider-location-upload';
+
+// Must be defined at module level — TaskManager requires this to be outside any component.
+// Uses raw fetch (not api()) because this runs in a background context with no access
+// to the component's clearSession binding. Token is read fresh from SecureStore each tick.
+TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
+  if (error) { console.warn('Background location error:', error.message); return; }
+  if (!data) return;
+  const { locations } = data;
+  const loc = locations[0];
+  if (!loc) return;
+  try {
+    const savedToken = await SecureStore.getItemAsync('rider_token');
+    if (!savedToken) return;
+    await fetch(`${BASE_URL}/api/rider/location`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${savedToken}` },
+      body: JSON.stringify({ lat: loc.coords.latitude, lng: loc.coords.longitude })
+    });
+  } catch (e) {
+    console.warn('Background location upload failed:', e.message);
+  }
+});
 
 const RENDER_FALLBACK = 'https://grocerease-backend-0uip.onrender.com';
 const _configured = process.env.EXPO_PUBLIC_API_BASE_URL || process.env.API_BASE_URL;
@@ -100,31 +125,37 @@ export default function App() {
 
   useEffect(() => {
     if (!rider || !token) return;
-    let locationInterval = null;
 
     const startTracking = async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Location permission denied');
-        return;
+      const { status: fg } = await Location.requestForegroundPermissionsAsync();
+      if (fg !== 'granted') { Alert.alert('Location permission denied'); return; }
+
+      const { status: bg } = await Location.requestBackgroundPermissionsAsync();
+      if (bg !== 'granted') {
+        Alert.alert('Background location denied', 'Location will only update while the app is open.');
       }
 
-      locationInterval = setInterval(async () => {
-        try {
-          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          await api(`${BASE_URL}/api/rider/location`, {
-            method: 'POST',
-            headers: authHeaders(token),
-            body: JSON.stringify({ lat: loc.coords.latitude, lng: loc.coords.longitude })
-          });
-        } catch (err) {
-          console.error('Location tracking error:', err);
-        }
-      }, 5000);
+      const already = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK).catch(() => false);
+      if (!already) {
+        await Location.startLocationUpdatesAsync(LOCATION_TASK, {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 5000,
+          distanceInterval: 0,
+          showsBackgroundLocationIndicator: true,
+          foregroundService: {
+            notificationTitle: 'GrocerEase Rider',
+            notificationBody: 'Tracking your location for active delivery',
+          },
+        });
+      }
     };
 
     startTracking();
-    return () => { if (locationInterval) clearInterval(locationInterval); };
+    return () => {
+      Location.hasStartedLocationUpdatesAsync(LOCATION_TASK)
+        .then(started => { if (started) Location.stopLocationUpdatesAsync(LOCATION_TASK); })
+        .catch(() => {});
+    };
   }, [rider, token]);
 
   const updateStatus = async (status) => {
@@ -159,6 +190,8 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    const started = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK).catch(() => false);
+    if (started) await Location.stopLocationUpdatesAsync(LOCATION_TASK);
     await SecureStore.deleteItemAsync('rider_token');
     await SecureStore.deleteItemAsync('rider_session');
     clearSession();

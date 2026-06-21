@@ -7,10 +7,14 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "UIBackgroundModes": ["location"]
+      }
     },
     "android": {
       "package": "com.devsorcerert.grocereraserider",
+      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION"],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -25,7 +29,8 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow Grocerease Rider to use your location for background tracking."
+          "locationAlwaysAndWhenInUsePermission": "Allow Grocerease Rider to use your location for delivery tracking.",
+          "isAndroidBackgroundLocationEnabled": true
         }
       ]
     ]
