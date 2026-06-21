@@ -2,7 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, Button, Alert, ActivityIndicator } from 'react-native';
 import * as Location from 'expo-location';
 
-const BASE_URL = 'https://api.grocereasetv.com';
+const RENDER_FALLBACK = 'https://grocerease-backend-0uip.onrender.com';
+const _configured = process.env.EXPO_PUBLIC_API_BASE_URL || process.env.API_BASE_URL;
+if (_configured === 'https://api.grocereasetv.com') {
+  throw new Error('BASE_URL points to the dead domain api.grocereasetv.com — set a valid EXPO_PUBLIC_API_BASE_URL');
+}
+const BASE_URL = _configured || RENDER_FALLBACK;
 
 export default function App() {
   const [phone, setPhone] = useState('');
