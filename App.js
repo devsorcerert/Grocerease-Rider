@@ -42,15 +42,24 @@ let _lastFetchError = null;
 
 // Central fetch wrapper — handles network failures and 401s in one place.
 // skipAuthRedirect: true for login, where 401 means wrong credentials not expired session.
-async function apiFetch(url, options, onUnauthorized, { skipAuthRedirect = false } = {}) {
-  console.log('[apiFetch] →', url);  // DIAG: confirm exact URL
+// timeoutMs: explicit request timeout (default 30s — Render cold start + bcrypt can take 10-20s).
+async function apiFetch(url, options, onUnauthorized, { skipAuthRedirect = false, timeoutMs = 30000 } = {}) {
+  console.log('[apiFetch] →', url);  // DIAG
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response;
   try {
-    response = await fetch(url, options);
+    response = await fetch(url, { ...options, signal: controller.signal });
   } catch (e) {
-    _lastFetchError = `${e.name}: ${e.message}`;
-    console.warn('[apiFetch] fetch threw:', e.name, e.message, '\nURL:', url);
+    // DIAG: dump everything — e.message is empty for OkHttp timeout errors
+    const dump = `name:${e.name} msg:${e.message} str:${e.toString()} json:${JSON.stringify(e)}`;
+    _lastFetchError = e.name === 'AbortError'
+      ? `AbortError: request timed out after ${timeoutMs / 1000}s`
+      : dump;
+    console.warn('[apiFetch] fetch threw:', dump, '\nURL:', url);
     return null;
+  } finally {
+    clearTimeout(timer);
   }
   if (response.status === 401) {
     if (!skipAuthRedirect) {
@@ -130,7 +139,13 @@ export default function App() {
       }, { skipAuthRedirect: true });
 
       if (!response) {
-        Alert.alert('Network error', `URL: ${loginUrl}\n\n${_lastFetchError || 'unknown error'}`);  // DIAG
+        const isTimeout = _lastFetchError?.startsWith('AbortError');
+        Alert.alert(
+          isTimeout ? 'Server took too long' : 'Network error',
+          isTimeout
+            ? `Server took too long to respond (>30s).\nIt may be waking up — wait 30s and try again.\n\nURL: ${loginUrl}`
+            : `URL: ${loginUrl}\n\n${_lastFetchError || 'unknown error'}`  // DIAG
+        );
         return;
       }
 
