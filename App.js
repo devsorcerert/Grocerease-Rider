@@ -71,6 +71,7 @@ export default function App() {
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(false);
   const [restoring, setRestoring] = useState(true);
+  const [healthStatus, setHealthStatus] = useState('checking…');  // DIAG
 
   const clearSession = () => { setRider(null); setToken(null); };
 
@@ -100,6 +101,20 @@ export default function App() {
     })();
   }, []);
 
+  // DIAG: probe health endpoint on mount to confirm basic reachability
+  useEffect(() => {
+    (async () => {
+      const url = `${BASE_URL}/health`;
+      try {
+        const r = await fetch(url, { method: 'GET' });
+        const text = await r.text();
+        setHealthStatus(`HTTP ${r.status}: ${text.slice(0, 80)}`);
+      } catch (e) {
+        setHealthStatus(`${e.name}: ${e.message}`);
+      }
+    })();
+  }, []);
+
   const handleLogin = async () => {
     if (!phone.trim() || !password.trim()) {
       Alert.alert('Required', 'Enter phone and password');
@@ -112,7 +127,11 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone, password })
       }, { skipAuthRedirect: true });
-      if (!response) { Alert.alert('Network error (login)', _lastFetchError || "Couldn't reach server"); return; }  // DIAG
+      if (!response) {
+        const loginUrl = `${BASE_URL}/api/rider/login`;
+        Alert.alert('Network error', `URL: ${loginUrl}\n\n${_lastFetchError || 'unknown error'}`);  // DIAG
+        return;
+      }
       const data = await response.json();
       if (!response.ok) {
         Alert.alert('Login failed', `HTTP ${response.status}: ${data.detail || 'Unknown error'}`);
@@ -234,6 +253,9 @@ export default function App() {
           ? <ActivityIndicator size="large" color="#2D8B47" />
           : <Button title="Login" onPress={handleLogin} color="#2D8B47" />
         }
+        {/* DIAG: visible on-screen diagnostics — remove before release */}
+        <Text style={styles.diagText}>API: {BASE_URL}</Text>
+        <Text style={styles.diagText}>health: {healthStatus}</Text>
       </View>
     );
   }
@@ -282,5 +304,6 @@ const styles = StyleSheet.create({
   orderTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 8, color: '#111' },
   statusLabel: { marginTop: 10, fontWeight: 'bold', color: '#e67e22', fontSize: 14 },
   buttonGroup: { marginTop: 16, gap: 10 },
-  noOrder: { textAlign: 'center', fontSize: 16, color: '#7f8c8d', fontStyle: 'italic', padding: 20 }
+  noOrder: { textAlign: 'center', fontSize: 16, color: '#7f8c8d', fontStyle: 'italic', padding: 20 },
+  diagText: { marginTop: 8, fontSize: 11, color: '#e74c3c', textAlign: 'center', fontFamily: 'monospace' }
 });
