@@ -121,28 +121,49 @@ export default function App() {
       return;
     }
     setLoading(true);
+    const loginUrl = `${BASE_URL}/api/rider/login`;
     try {
-      const response = await api(`${BASE_URL}/api/rider/login`, {
+      const response = await api(loginUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone, password })
       }, { skipAuthRedirect: true });
+
       if (!response) {
-        const loginUrl = `${BASE_URL}/api/rider/login`;
         Alert.alert('Network error', `URL: ${loginUrl}\n\n${_lastFetchError || 'unknown error'}`);  // DIAG
         return;
       }
-      const data = await response.json();
-      if (!response.ok) {
-        Alert.alert('Login failed', `HTTP ${response.status}: ${data.detail || 'Unknown error'}`);
-      } else {
-        setToken(data.token);
-        setRider(data);
-        await SecureStore.setItemAsync('rider_token', data.token);
-        await SecureStore.setItemAsync('rider_session', JSON.stringify(data));
+
+      // DIAG: read raw body first, then try JSON parse
+      const rawText = await response.text();
+      let data = null;
+      let parseError = null;
+      try { data = JSON.parse(rawText); } catch (pe) { parseError = pe.message; }
+
+      // DIAG: always show status + raw body in alert so we can read it off the screen
+      if (!response.ok || parseError) {
+        Alert.alert(
+          `Login response HTTP ${response.status}`,
+          `URL: ${loginUrl}\n\nRaw body:\n${rawText.slice(0, 400)}${parseError ? `\n\nJSON parse error: ${parseError}` : ''}`
+        );
+        return;
       }
+
+      if (!data.token) {
+        Alert.alert(
+          `Login HTTP ${response.status} — no token`,
+          `URL: ${loginUrl}\n\nBody:\n${rawText.slice(0, 400)}`  // DIAG
+        );
+        return;
+      }
+
+      setToken(data.token);
+      setRider(data);
+      await SecureStore.setItemAsync('rider_token', data.token);
+      await SecureStore.setItemAsync('rider_session', JSON.stringify(data));
     } catch (e) {
-      Alert.alert('Network error', e.message);
+      // DIAG: show full error object, not just .message
+      Alert.alert('Login threw', `URL: ${loginUrl}\n\n${e.name}: ${e.message}\n\n${JSON.stringify(e)}`);
     } finally {
       setLoading(false);
     }
