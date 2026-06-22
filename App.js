@@ -37,14 +37,19 @@ const BASE_URL = (_configured && _configured !== 'https://api.grocereasetv.com')
   ? _configured
   : RENDER_FALLBACK;
 
+// Temporary diagnostic: stores the last fetch error so callers can surface it.
+let _lastFetchError = null;
+
 // Central fetch wrapper — handles network failures and 401s in one place.
 // skipAuthRedirect: true for login, where 401 means wrong credentials not expired session.
 async function apiFetch(url, options, onUnauthorized, { skipAuthRedirect = false } = {}) {
+  console.log('[apiFetch] →', url);  // DIAG: confirm exact URL
   let response;
   try {
     response = await fetch(url, options);
   } catch (e) {
-    console.warn('apiFetch network error:', e.message);
+    _lastFetchError = `${e.name}: ${e.message}`;
+    console.warn('[apiFetch] fetch threw:', e.name, e.message, '\nURL:', url);
     return null;
   }
   if (response.status === 401) {
@@ -55,6 +60,7 @@ async function apiFetch(url, options, onUnauthorized, { skipAuthRedirect = false
     }
     return null;
   }
+  _lastFetchError = null;
   return response;
 }
 
@@ -106,10 +112,10 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone, password })
       }, { skipAuthRedirect: true });
-      if (!response) { Alert.alert('Network error', "Couldn't reach server, try again"); return; }
+      if (!response) { Alert.alert('Network error (login)', _lastFetchError || "Couldn't reach server"); return; }  // DIAG
       const data = await response.json();
       if (!response.ok) {
-        Alert.alert('Login failed', data.detail || 'Unknown error');
+        Alert.alert('Login failed', `HTTP ${response.status}: ${data.detail || 'Unknown error'}`);
       } else {
         setToken(data.token);
         setRider(data);
