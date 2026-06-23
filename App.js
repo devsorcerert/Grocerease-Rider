@@ -149,10 +149,10 @@ export default function App() {
     });
     if (!response || !response.ok) return;
     const data = await response.json();
-    // Backend returns the order object directly (or null/empty when no order)
+    // GET /api/rider/current-order returns { "order": <order|null> }
     setRider(prev => {
       if (!prev) return prev;
-      const newOrder = data?.id ? data : null;
+      const newOrder = data?.order?.id ? data.order : null;
       return { ...prev, current_order: newOrder };
     });
   }, []);
@@ -187,13 +187,24 @@ export default function App() {
       }
     })();
 
-    const sub = Notifications.addNotificationReceivedListener(notification => {
-      const type = notification.request.content.data?.type;
-      if (type === 'new_order') {
+    // Foreground: notification arrives while app is open
+    // Backend sends push data { order_id } with type "order" (CONTRACTS.md §6)
+    const fgSub = Notifications.addNotificationReceivedListener(notification => {
+      const data = notification.request.content.data || {};
+      if (data.order_id || data.type === 'order') {
         fetchCurrentOrder();
       }
     });
-    return () => sub.remove();
+
+    // Background/killed: user taps the notification banner to open the app
+    const bgSub = Notifications.addNotificationResponseReceivedListener(response => {
+      const data = response.notification.request.content.data || {};
+      if (data.order_id || data.type === 'order') {
+        fetchCurrentOrder();
+      }
+    });
+
+    return () => { fgSub.remove(); bgSub.remove(); };
   }, [rider, token, fetchCurrentOrder]);
 
   const handleLogin = async () => {
