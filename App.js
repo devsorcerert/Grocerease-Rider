@@ -1,8 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { StyleSheet, Text, View, TextInput, Button, Alert, ActivityIndicator } from 'react-native';
 import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
 import * as SecureStore from 'expo-secure-store';
+
+// Show notifications in foreground as banners/alerts
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 const LOCATION_TASK = 'rider-location-upload';
 
@@ -82,6 +92,10 @@ export default function App() {
   const [restoring, setRestoring] = useState(true);
   const [healthStatus, setHealthStatus] = useState('checking…');  // DIAG
 
+  // Keep latest token accessible inside poll/notification callbacks without stale closures
+  const tokenRef = useRef(null);
+  useEffect(() => { tokenRef.current = token; }, [token]);
+
   const clearSession = () => { setRider(null); setToken(null); };
 
   // Bind onUnauthorized once; every API call uses this instead of raw fetch
@@ -123,6 +137,64 @@ export default function App() {
       }
     })();
   }, []);
+
+  // Fetch the current order from the backend and merge into rider state.
+  // Safe to call at any time; no-ops if not logged in.
+  const fetchCurrentOrder = useCallback(async () => {
+    const tok = tokenRef.current;
+    if (!tok) return;
+    const response = await api(`${BASE_URL}/api/rider/current-order`, {
+      method: 'GET',
+      headers: authHeaders(tok),
+    });
+    if (!response || !response.ok) return;
+    const data = await response.json();
+    // Backend returns the order object directly (or null/empty when no order)
+    setRider(prev => {
+      if (!prev) return prev;
+      const newOrder = data?.id ? data : null;
+      return { ...prev, current_order: newOrder };
+    });
+  }, []);
+
+  // Poll GET /api/rider/current-order every 15 s while the rider is idle (no active order).
+  // The interval is cleared the moment an order becomes active.
+  useEffect(() => {
+    if (!rider || !token) return;
+    if (rider.current_order) return; // active order — no polling needed
+
+    const intervalId = setInterval(fetchCurrentOrder, 15000);
+    return () => clearInterval(intervalId);
+  }, [rider?.current_order, rider, token, fetchCurrentOrder]);
+
+  // Refresh immediately when a push notification arrives indicating a new order.
+  useEffect(() => {
+    if (!rider || !token) return;
+
+    // Register push token with backend so the server can target this device
+    (async () => {
+      try {
+        const { status } = await Notifications.requestPermissionsAsync();
+        if (status !== 'granted') return;
+        const pushTokenObj = await Notifications.getExpoPushTokenAsync();
+        await api(`${BASE_URL}/api/rider/push-token`, {
+          method: 'POST',
+          headers: authHeaders(token),
+          body: JSON.stringify({ token: pushTokenObj.data }),
+        });
+      } catch (e) {
+        console.warn('Push token registration failed:', e.message);
+      }
+    })();
+
+    const sub = Notifications.addNotificationReceivedListener(notification => {
+      const type = notification.request.content.data?.type;
+      if (type === 'new_order') {
+        fetchCurrentOrder();
+      }
+    });
+    return () => sub.remove();
+  }, [rider, token, fetchCurrentOrder]);
 
   const handleLogin = async () => {
     if (!phone.trim() || !password.trim()) {
