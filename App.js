@@ -348,7 +348,7 @@ export default function App() {
       }
       Alert.alert(
         'Registration submitted ✅',
-        'An admin will review and approve your account. You'll be able to log in once approved.',
+        "An admin will review and approve your account. You'll be able to log in once approved.",
         [{ text: 'Go to Login', onPress: () => setMode('login') }]
       );
       setRegName(''); setRegPhone(''); setRegPassword(''); setRegVehicle('Bike');
