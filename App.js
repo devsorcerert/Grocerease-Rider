@@ -133,6 +133,9 @@ export default function App() {
   const [isOnline, setIsOnline] = useState(true);        // Task 27
   const [orderQueue, setOrderQueue] = useState([]);       // Task 31
   const [healthStatus, setHealthStatus] = useState('checking…'); // DIAG
+  const [activeTab, setActiveTab] = useState('orders');  // P1-B1: 'orders' | 'earnings'
+  const [earnings, setEarnings] = useState(null);
+  const [earningsLoading, setEarningsLoading] = useState(false);
 
   // Keep token accessible in callbacks without stale closures
   const tokenRef = useRef(null);
@@ -403,6 +406,20 @@ export default function App() {
     finally { setLoading(false); }
   };
 
+  // ── P1-B1: Fetch earnings ─────────────────────────────────────────────────────
+  const fetchEarnings = useCallback(async () => {
+    const tok = tokenRef.current;
+    if (!tok) return;
+    setEarningsLoading(true);
+    try {
+      const resp = await api(`${BASE_URL}/api/rider/earnings`, {
+        method: 'GET', headers: authHeaders(tok),
+      });
+      if (resp && resp.ok) setEarnings(await resp.json());
+    } catch (e) { console.warn('Earnings fetch failed:', e.message); }
+    finally { setEarningsLoading(false); }
+  }, []);
+
   // ── Logout ────────────────────────────────────────────────────────────────
   const handleLogout = async () => {
     const started = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK).catch(() => false);
@@ -473,12 +490,10 @@ export default function App() {
 
   // ── Dashboard ─────────────────────────────────────────────────────────────
   return (
-    <ScrollView contentContainerStyle={s.container}>
-      {/* Header row */}
-      <View style={s.headerRow}>
+    <View style={{ flex: 1, backgroundColor: '#ecf0f1' }}>
+      {/* Header */}
+      <View style={s.appHeader}>
         <Text style={s.title}>👋 {rider.name}</Text>
-
-        {/* Task 27: availability toggle */}
         <TouchableOpacity
           style={[s.statusBadge, isOnline ? s.badgeOnline : s.badgeOffline]}
           onPress={toggleAvailability}
@@ -487,66 +502,138 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
-      {/* ── Active order ──────────────────────────────────────────────── */}
-      <View style={s.orderContainer}>
-        {rider.current_order ? (
-          <>
-            <Text style={s.orderTitle}>
-              Order #{rider.current_order.id?.slice(0, 8).toUpperCase()}
-            </Text>
-            <Text>📍 {rider.current_order.delivery_address}</Text>
-            <Text>💰 ₹{rider.current_order.subtotal}</Text>
-            <Text style={s.statusLabel}>
-              Status: {rider.current_order.delivery_status}
-            </Text>
-
-            {/* Task 28: navigate button */}
-            <TouchableOpacity
-              style={s.navButton}
-              onPress={() => openNavigation(rider.current_order.delivery_address)}
-            >
-              <Text style={s.navButtonText}>🗺️ Open in Google Maps</Text>
-            </TouchableOpacity>
-
-            {loading
-              ? <ActivityIndicator color="#2D8B47" style={{ marginTop: 16 }} />
-              : (
-                <View style={s.buttonGroup}>
-                  <Button title="Reached Store"    onPress={() => updateStatus('reached_store')}    color="#f39c12" />
-                  <Button title="Picked Up"         onPress={() => updateStatus('picked_up')}         color="#3498db" />
-                  <Button title="Out for Delivery"  onPress={() => updateStatus('out_for_delivery')}  color="#9b59b6" />
-                  <Button title="Delivered ✅"      onPress={() => updateStatus('delivered')}          color="#2ecc71" />
-                </View>
-              )
-            }
-          </>
-        ) : (
-          <Text style={s.noOrder}>⏳ Waiting for orders...</Text>
-        )}
+      {/* Tab bar */}
+      <View style={s.tabBar}>
+        <TouchableOpacity
+          style={[s.tab, activeTab === 'orders' && s.tabActive]}
+          onPress={() => setActiveTab('orders')}
+        >
+          <Text style={[s.tabText, activeTab === 'orders' && s.tabTextActive]}>📦 Orders</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[s.tab, activeTab === 'earnings' && s.tabActive]}
+          onPress={() => { setActiveTab('earnings'); if (!earnings) fetchEarnings(); }}
+        >
+          <Text style={[s.tabText, activeTab === 'earnings' && s.tabTextActive]}>💰 Earnings</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* ── Task 31: queued orders ────────────────────────────────────── */}
-      {orderQueue.length > 0 && (
-        <View style={s.queueContainer}>
-          <Text style={s.queueTitle}>📋 Upcoming Orders ({orderQueue.length})</Text>
-          {orderQueue.map((o, i) => (
-            <View key={o.id} style={s.queueItem}>
-              <Text style={s.queueOrderNum}>
-                #{i + 1} — Order {o.id?.slice(0, 8).toUpperCase()}
-              </Text>
-              <Text style={s.queueAddr}>📍 {o.delivery_address}</Text>
-              <TouchableOpacity onPress={() => openNavigation(o.delivery_address)}>
-                <Text style={s.queueNav}>🗺️ Preview route</Text>
-              </TouchableOpacity>
+      {/* ── ORDERS TAB ── */}
+      {activeTab === 'orders' && (
+        <ScrollView contentContainerStyle={s.tabContent}>
+          <View style={s.orderContainer}>
+            {rider.current_order ? (
+              <>
+                <Text style={s.orderTitle}>
+                  Order #{rider.current_order.id?.slice(0, 8).toUpperCase()}
+                </Text>
+                <Text>📍 {rider.current_order.delivery_address}</Text>
+                <Text>💰 ₹{rider.current_order.subtotal}</Text>
+                <Text style={s.statusLabel}>Status: {rider.current_order.delivery_status}</Text>
+                <TouchableOpacity style={s.navButton}
+                  onPress={() => openNavigation(rider.current_order.delivery_address)}>
+                  <Text style={s.navButtonText}>🗺️ Open in Google Maps</Text>
+                </TouchableOpacity>
+                {loading
+                  ? <ActivityIndicator color="#2D8B47" style={{ marginTop: 16 }} />
+                  : (
+                    <View style={s.buttonGroup}>
+                      <Button title="Reached Store"   onPress={() => updateStatus('reached_store')}   color="#f39c12" />
+                      <Button title="Picked Up"        onPress={() => updateStatus('picked_up')}        color="#3498db" />
+                      <Button title="Out for Delivery" onPress={() => updateStatus('out_for_delivery')} color="#9b59b6" />
+                      <Button title="Delivered ✅"     onPress={() => updateStatus('delivered')}         color="#2ecc71" />
+                    </View>
+                  )
+                }
+              </>
+            ) : (
+              <Text style={s.noOrder}>⏳ Waiting for orders...</Text>
+            )}
+          </View>
+          {orderQueue.length > 0 && (
+            <View style={s.queueContainer}>
+              <Text style={s.queueTitle}>📋 Upcoming Orders ({orderQueue.length})</Text>
+              {orderQueue.map((o, i) => (
+                <View key={o.id} style={s.queueItem}>
+                  <Text style={s.queueOrderNum}>#{i + 1} — Order {o.id?.slice(0, 8).toUpperCase()}</Text>
+                  <Text style={s.queueAddr}>📍 {o.delivery_address}</Text>
+                  <TouchableOpacity onPress={() => openNavigation(o.delivery_address)}>
+                    <Text style={s.queueNav}>🗺️ Preview route</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
             </View>
-          ))}
-        </View>
+          )}
+          <View style={{ marginTop: 8, marginBottom: 24 }}>
+            <Button title="Logout" color="#e74c3c" onPress={handleLogout} />
+          </View>
+        </ScrollView>
       )}
 
-      <View style={{ marginTop: 8 }}>
-        <Button title="Logout" color="#e74c3c" onPress={handleLogout} />
-      </View>
-    </ScrollView>
+      {/* ── EARNINGS TAB ── */}
+      {activeTab === 'earnings' && (
+        <ScrollView contentContainerStyle={s.tabContent}>
+          {earningsLoading && <ActivityIndicator size="large" color="#2D8B47" style={{ marginTop: 40 }} />}
+          {!earningsLoading && earnings && (
+            <>
+              <View style={s.earningsGrid}>
+                <View style={[s.earningsCard, { backgroundColor: '#d5f5e3' }]}>
+                  <Text style={s.earningsLabel}>Today</Text>
+                  <Text style={s.earningsAmount}>₹{earnings.today.toFixed(0)}</Text>
+                </View>
+                <View style={[s.earningsCard, { backgroundColor: '#d6eaf8' }]}>
+                  <Text style={s.earningsLabel}>This Week</Text>
+                  <Text style={s.earningsAmount}>₹{earnings.this_week.toFixed(0)}</Text>
+                </View>
+                <View style={[s.earningsCard, { backgroundColor: '#fdebd0' }]}>
+                  <Text style={s.earningsLabel}>This Month</Text>
+                  <Text style={s.earningsAmount}>₹{earnings.this_month.toFixed(0)}</Text>
+                </View>
+                <View style={[s.earningsCard, { backgroundColor: '#e8daef' }]}>
+                  <Text style={s.earningsLabel}>All Time</Text>
+                  <Text style={s.earningsAmount}>₹{earnings.all_time.toFixed(0)}</Text>
+                </View>
+              </View>
+              <Text style={s.deliveryCount}>🚚 {earnings.total_deliveries} deliveries completed</Text>
+              <Text style={s.recentTitle}>Recent Deliveries</Text>
+              {earnings.recent_deliveries.length === 0 && (
+                <Text style={s.noOrder}>No deliveries yet.</Text>
+              )}
+              {earnings.recent_deliveries.map((d) => (
+                <View key={d.order_id} style={s.deliveryRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.deliveryOrderId}>Order {d.order_id?.slice(0, 8).toUpperCase()}</Text>
+                    <Text style={s.deliveryAddr} numberOfLines={1}>{d.address}</Text>
+                    {d.delivered_at && (
+                      <Text style={s.deliveryTime}>
+                        {new Date(d.delivered_at).toLocaleDateString('en-IN', {
+                          day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+                        })}
+                      </Text>
+                    )}
+                  </View>
+                  <Text style={s.deliveryFee}>₹{d.amount.toFixed(0)}</Text>
+                </View>
+              ))}
+              <TouchableOpacity onPress={fetchEarnings} style={s.refreshBtn}>
+                <Text style={s.refreshBtnText}>🔄 Refresh</Text>
+              </TouchableOpacity>
+            </>
+          )}
+          {!earningsLoading && !earnings && (
+            <View style={{ alignItems: 'center', marginTop: 40 }}>
+              <Text style={s.noOrder}>Could not load earnings.</Text>
+              <TouchableOpacity onPress={fetchEarnings} style={[s.navButton, { marginTop: 16 }]}>
+                <Text style={s.navButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          <View style={{ marginTop: 16, marginBottom: 24 }}>
+            <Button title="Logout" color="#e74c3c" onPress={handleLogout} />
+          </View>
+        </ScrollView>
+      )}
+    </View>
   );
 }
 
@@ -584,4 +671,32 @@ const s = StyleSheet.create({
   queueNav:     { color: '#2980b9', marginTop: 4, fontSize: 13 },
   diagText:     { marginTop: 8, fontSize: 11, color: '#e74c3c',
                   textAlign: 'center', fontFamily: 'monospace' },
+  // P1-B1 earnings + tab styles
+  appHeader:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+                  paddingHorizontal: 16, paddingTop: 48, paddingBottom: 12,
+                  backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+  tabBar:       { flexDirection: 'row', backgroundColor: '#fff',
+                  borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+  tab:          { flex: 1, paddingVertical: 12, alignItems: 'center' },
+  tabActive:    { borderBottomWidth: 3, borderBottomColor: '#2D8B47' },
+  tabText:      { fontSize: 14, fontWeight: '600', color: '#9CA3AF' },
+  tabTextActive:{ color: '#2D8B47' },
+  tabContent:   { padding: 16, paddingBottom: 40 },
+  earningsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
+  earningsCard: { width: '47%', borderRadius: 12, padding: 14, alignItems: 'center' },
+  earningsLabel:{ fontSize: 12, color: '#6B7280', fontWeight: '600', marginBottom: 4 },
+  earningsAmount:{ fontSize: 22, fontWeight: 'bold', color: '#111' },
+  deliveryCount:{ textAlign: 'center', color: '#6B7280', fontSize: 13, marginBottom: 16 },
+  recentTitle:  { fontSize: 16, fontWeight: '700', color: '#111', marginBottom: 10 },
+  deliveryRow:  { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
+                  borderRadius: 10, padding: 12, marginBottom: 8,
+                  shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: 0.06, shadowRadius: 2, elevation: 1 },
+  deliveryOrderId: { fontWeight: '700', color: '#111', fontSize: 14 },
+  deliveryAddr: { color: '#6B7280', fontSize: 12, marginTop: 2 },
+  deliveryTime: { color: '#9CA3AF', fontSize: 11, marginTop: 2 },
+  deliveryFee:  { fontSize: 18, fontWeight: 'bold', color: '#2D8B47', marginLeft: 8 },
+  refreshBtn:   { alignSelf: 'center', marginTop: 16, paddingHorizontal: 24,
+                  paddingVertical: 10, backgroundColor: '#f3f4f6', borderRadius: 8 },
+  refreshBtnText:{ color: '#374151', fontWeight: '600', fontSize: 14 },
 });
