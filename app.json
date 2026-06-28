@@ -1,20 +1,26 @@
 {
   "expo": {
-    "name": "Grocerease-Rider",
-    "slug": "Grocerease-Rider",
+    "name": "GrocerEase Rider",
+    "slug": "grocerease-rider",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "infoPlist": {
-        "UIBackgroundModes": ["location"]
-      }
+        "UIBackgroundModes": [
+          "location"
+        ]
+      },
+      "bundleIdentifier": "com.grocereasetv.rider"
     },
     "android": {
-      "package": "com.devsorcerert.grocereraserider",
-      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION"],
+      "package": "com.grocereasetv.rider",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -29,10 +35,12 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow Grocerease Rider to use your location for delivery tracking.",
+          "locationAlwaysAndWhenInUsePermission": "Allow GrocerEase Rider to use your location for delivery tracking.",
           "isAndroidBackgroundLocationEnabled": true
         }
       ]
-    ]
+    ],
+    "description": "GrocerEase delivery partner app",
+    "scheme": "grocerease-rider"
   }
 }
