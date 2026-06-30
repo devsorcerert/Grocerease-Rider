@@ -75,8 +75,10 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
 // ─── Central fetch wrapper ────────────────────────────────────────────────────
 let _lastFetchError = null;
 
+const __DEV__ = process.env.NODE_ENV !== 'production';
+
 async function apiFetch(url, options, onUnauthorized, { skipAuthRedirect = false, timeoutMs = 30000 } = {}) {
-  console.log('[apiFetch] →', url);
+  if (__DEV__) console.log('[apiFetch] →', url);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response;
@@ -481,9 +483,9 @@ export default function App() {
         <TouchableOpacity onPress={() => setMode('register')} style={{ marginTop: 16 }}>
           <Text style={s.linkText}>New rider? Register here →</Text>
         </TouchableOpacity>
-        {/* DIAG */}
-        <Text style={s.diagText}>API: {BASE_URL}</Text>
-        <Text style={s.diagText}>health: {healthStatus}</Text>
+        {/* DIAG — dev only */}
+        {__DEV__ && <Text style={s.diagText}>API: {BASE_URL}</Text>}
+        {__DEV__ && <Text style={s.diagText}>health: {healthStatus}</Text>}
       </View>
     );
   }
